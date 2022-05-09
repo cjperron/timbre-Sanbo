@@ -8,91 +8,53 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 */
+#define LED 2
+#define BOTON_MENU 3
+#define BOTON_ADD 4
+#define BOTON_REMOVE 5
+#define BOTON_UP 6
+#define BOTON_DOWN 7
+#define BOTON_RIGHT 8
+#define BOTON_LEFT 9
+#define BOTON_ENTER 10
+#define max_alarmas 5
+#include <EEPROM.h>
 #include <Wire.h>
 #include "RTClib.h"
 #include <LiquidCrystal_I2C.h>
 LiquidCrystal_I2C lcd(0x27, 16, 2); // set the LCD address to 0x27 or 0x03
-RTC_DS1307 rtc;
-byte reloj_12[8]={
-  B01110,
-  B10101,
-  B10101,
-  B10101,
-  B10101,
-  B10001,
-  B10001,
-  B01110,
+RTC_DS3231 rtc;
+byte backslash[8]={
+  B00000,
+  B10000,
+  B01000,
+  B00100,
+  B00010,
+  B00001,
+  B00000,
+  B00000,
 };
-byte reloj_1_30[8]={
-  B01110,
-  B10011,
-  B10011,
-  B10101,
-  B10101,
+byte cuadrado_vacio[8]={
+  B11111,
   B10001,
   B10001,
-  B01110,
+  B10001,
+  B10001,
+  B10001,
+  B10001,
+  B11111,
 };
-byte reloj_3[8]={
-  B01110,
-  B10001,
-  B10001,
-  B10001,
-  B10111,
-  B10001,
-  B10001,
-  B01110,
+byte cuadrado_lleno[8]={
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+  B11111,
 };
-byte reloj_4_30[8]={
-  B01110,
-  B10001,
-  B10001,
-  B10001,
-  B10101,
-  B10101,
-  B10011,
-  B01110,
-};
-byte reloj_6[8]={
-  B01110,
-  B10001,
-  B10001,
-  B10001,
-  B10101,
-  B10101,
-  B10101,
-  B01110,
-};
-byte reloj_7_30[8]={
-  B01110,
-  B10001,
-  B10001,
-  B10001,
-  B10101,
-  B10101,
-  B11001,
-  B01110,
-};
-byte reloj_9[8]={
-  B01110,
-  B10001,
-  B10001,
-  B10001,
-  B11101,
-  B10001,
-  B10001,
-  B01110,
-};
-byte reloj_10_30[8]={
-  B01110,
-  B11001,
-  B10101,
-  B10101,
-  B10101,
-  B10001,
-  B10001,
-  B01110,
-};
+void mostrarAlarmas(void);
 void setup()
 {
   Serial.begin(9600);
@@ -101,35 +63,53 @@ void setup()
     //Serial.flush(); sin esta linea, aparentemente tira basura rtc.now()
     while (1) delay(10);
   }
-  //Todos estos caracteres son la animacion del reloj
-  lcd.createChar(0, reloj_12);
-  lcd.createChar(1, reloj_1_30);
-  lcd.createChar(2, reloj_3);
-  lcd.createChar(3, reloj_4_30);
-  lcd.createChar(4, reloj_6);
-  lcd.createChar(5, reloj_7_30);
-  lcd.createChar(6, reloj_9);
-  lcd.createChar(7, reloj_10_30);
+  //rtc.adjust(DateTime(F(__DATE__), F(__TIME__))); //Una vez
+  //Los botones.
+  pinMode(LED, OUTPUT);
+  pinMode(BOTON_MENU, INPUT);
+  pinMode(BOTON_ADD, INPUT);
+  pinMode(BOTON_REMOVE, INPUT);
+  pinMode(BOTON_UP, INPUT);
+  pinMode(BOTON_DOWN, INPUT);
+  pinMode(BOTON_RIGHT, INPUT);
+  pinMode(BOTON_LEFT, INPUT);
+  pinMode(BOTON_ENTER, INPUT);
+  pinMode(BOTON_MENU, INPUT_PULLUP);
+  pinMode(BOTON_ADD, INPUT_PULLUP);
+  pinMode(BOTON_REMOVE, INPUT_PULLUP);
+  pinMode(BOTON_UP, INPUT_PULLUP);
+  pinMode(BOTON_DOWN, INPUT_PULLUP);
+  pinMode(BOTON_RIGHT, INPUT_PULLUP);
+  pinMode(BOTON_LEFT, INPUT_PULLUP);
+  pinMode(BOTON_ENTER, INPUT_PULLUP);
+  //Para marcar que se encendio.
+  digitalWrite(LED, HIGH);
+  lcd.createChar(0, backslash);
   lcd.init();          
   lcd.backlight();     
   lcd.setCursor(0, 0); // columna, fila       
-  lcd.print("   Alarma Sanbo");
+  lcd.print("  Timbre Sanbo");
 }
 
-char diasDeLaSemana[7][12] = {"Domingo", "Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"}; //a implementar.
+char diasDeLaSemana[7][2] = {"D", "L", "m", "M", "J", "V", "S"};
+char animacion[8][2] = {"/", "-", "\0","|","/","-","\0","|"};
+
+//La EEPROM guarda valores de 1 byte... por ende se debe guardar la alarma dividida en 4 valores, segs, mins, hs, dia
+int horarios[max_alarmas][/*Valores*/4]= {
+  //el dia va de 0 a 6
+  EEPROM.read(0),EEPROM.read(1),EEPROM.read(2),EEPROM.read(3),      //[numero de alarma][hora, minuto, segundo, dia][cantidad maxima de caracteres]
+  EEPROM.read(4),EEPROM.read(5),EEPROM.read(6),EEPROM.read(7),      // idem
+  EEPROM.read(8),EEPROM.read(9),EEPROM.read(10),EEPROM.read(11),    // idem
+  EEPROM.read(12),EEPROM.read(13),EEPROM.read(14),EEPROM.read(15),  // idem
+  EEPROM.read(16),EEPROM.read(17),EEPROM.read(18),EEPROM.read(19),  // idem
+};
 int i{0}, j{0};
 void loop()
 {
-  DateTime now = rtc.now(); //DEBE QUEDARSE DENTRO DE VOID LOOP.
-  lcd.setCursor(0, 1);/* A IMPLEMENTAR SCROLLEANDO  
-    lcd.print(now.year());
-    lcd.print('/');
-    lcd.print(now.month());
-    lcd.print('/');
-    lcd.print(now.day());
-    lcd.print(" (diaDeLaSemana");
-    lcd.print(") ");
-    */
+  //DEBE QUEDARSE DENTRO DE VOID LOOP.
+  DateTime now = rtc.now(); 
+  //Menu inicial
+  lcd.setCursor(0, 1);
     if(now.hour()<10 ){
       lcd.print("0");
       lcd.print(now.hour());
@@ -145,18 +125,26 @@ void loop()
       lcd.print(now.second());
     } else lcd.print(now.second());
     lcd.print(" ");
-    lcd.write(byte(i)); //No funciona correctamanete en simulacion.
+    lcd.print(diasDeLaSemana[now.dayOfTheWeek()][0]);
+    lcd.print(" ");
+    lcd.print((int)rtc.getTemperature());
+    lcd.print("C ");
+    if (i==2 || i==6){
+      lcd.write(byte(0));
+    }
+    else lcd.print(animacion[i]); //No funciona correctamanete en simulacion.
     i++;
     if(i==8){
       i=0;
     }
-    delay(100); //Para hacer que el reloj no sea el rayo mcqueen
-    //delay(1000); SOLO CUANDO NO ANDE BIEN A FRECUENCIA DE CLOCK 16Mhz
+    delay(250); //Para hacer que el reloj no sea el rayo mcqueen
+  //Menu de alarmas
+  if(digitalRead(BOTON_MENU)==LOW){
+    mostrarAlarmas();
+  }
 
     /*
     Restante: 
-
-    Definir los botones de la alarma. { "MENU", "+", "-", "ENTER" "FLECHA-ARRIBA", "FLECHA-ABAJO", "FLECHA-DERECHA", "FLECHA-IZQUIERDA" }
 
     Hacer el menu que salte con tocar el boton "MENU", y que te diga cuantas alarmas hay, y que las
     figure scrolleando. 
@@ -173,6 +161,32 @@ void loop()
     
     */
 }
-
+//Funcion que muestra las alarmas.
+void mostrarAlarmas(){
+  while(1){
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Alarmas");
+  delay(1000);
+  lcd.clear();
+  //Mostrar alarma 1 durante 3 segundos.
+  lcd.setCursor(0, 0);
+  lcd.print("1");
+  lcd.setCursor(0, 1);
+  for (int i = 0; i < 4; i++)
+  {
+    if (i==3){
+      lcd.print(" ");
+      lcd.print(diasDeLaSemana[horarios[0][4]][0]); //dudoso, me fijo luego
+    }
+    if(horarios[0][i]<10){
+      lcd.print("0");
+      lcd.print(horarios[0][i]);
+    } else lcd.print(horarios[0][i]);
+    lcd.print(horarios[0][i]);
+  }
+  }
+  return;
+}
 
 //inserte Funcion que hace que el texto (en input) se desplace de izquierda a derecha en la linea especificada en el input.
