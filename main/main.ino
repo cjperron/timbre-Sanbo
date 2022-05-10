@@ -17,6 +17,7 @@
 #define BOTON_RIGHT 8
 #define BOTON_LEFT 9
 #define BOTON_ENTER 10
+#define BOTON_EMERGENCIA 11
 #define max_alarmas 8
 #include <EEPROM.h>
 #include <Wire.h>
@@ -24,20 +25,14 @@
 #include <LiquidCrystal_I2C.h>
 LiquidCrystal_I2C lcd(0x27, 16, 2); //poner el address del LCD en 0x27 o 0x03
 RTC_DS3231 rtc;
-//La EEPROM guarda valores de 1 byte... por ende se debe guardar la alarma dividida en 4 valores, segs, mins, hs, dia
-int horarios[max_alarmas][/*Valores*/4]= {
-  //el dia va de 0 a 6
-  //para cada combinacion de dias, al menos 2^7=128 combinaciones
-  //La unica manera de romper el codigo es sobreescribiendo la eeprom con cualquier cosa, es decir, dia 16, hora 99, etc.
-  EEPROM.read(0),EEPROM.read(1),EEPROM.read(2),EEPROM.read(3),      //[numero de alarma][hora, minuto, segundo, dia]
-  EEPROM.read(4),EEPROM.read(5),EEPROM.read(6),EEPROM.read(7),      // idem
-  EEPROM.read(8),EEPROM.read(9),EEPROM.read(10),EEPROM.read(11),    // idem
-  EEPROM.read(12),EEPROM.read(13),EEPROM.read(14),EEPROM.read(15),  // idem
-  EEPROM.read(16),EEPROM.read(17),EEPROM.read(18),EEPROM.read(19),  // idem
-  EEPROM.read(20),EEPROM.read(21),EEPROM.read(22),EEPROM.read(23),  // idem
-  EEPROM.read(24),EEPROM.read(25),EEPROM.read(26),EEPROM.read(27),  // idem
-  EEPROM.read(28),EEPROM.read(29),EEPROM.read(30),EEPROM.read(31),  // idem
+struct alarma{
+  int hora;
+  int minuto;
+  int segundo;
+  char dias[7];
 };
+struct alarma alarmas[max_alarmas+1];
+//La gracia de las lineas de arriba es saber que dias estan seleccionados.
 byte backslash[8]={
   B00000,
   B10000,
@@ -71,7 +66,10 @@ byte cuadrado_lleno[8]={
 void mostrarAlarmas(void);
 void ingresarAlarmas(void);
 void clearEEPROM(void);
+void overwriteEEPROM(void); //En caso de que se actualize el struct alarma alarmas.
 int isButtonPressed(void);
+void actualizarAlarma(int);
+void titilar(int, int*);
 void setup()
 {
   Serial.begin(9600);
@@ -105,8 +103,22 @@ void setup()
   lcd.createChar(1, cuadrado_vacio);
   lcd.createChar(2, cuadrado_lleno);
   lcd.init();          
-  lcd.backlight();     
-  
+  lcd.backlight(); 
+//  clearEEPROM();
+  int cprom=0; //para llevar la cuenta de la memoria EEPROM    
+  //Lleno el array de structs
+  for(int i=0;i<max_alarmas;i++){
+    alarmas[i].hora = EEPROM.read(cprom);
+    cprom++;
+    alarmas[i].minuto = EEPROM.read(cprom);
+    cprom++;
+    alarmas[i].segundo = EEPROM.read(cprom);
+    cprom++;
+    for(int j=0;j<7;j++){
+      alarmas[i].dias[j] = EEPROM.read(cprom);
+      cprom++;
+  }
+}
 }
 
 char diasDeLaSemana[7][2] = {"D", "L", "m", "M", "J", "V", "S"};
@@ -138,6 +150,7 @@ void loop()
     lcd.print(diasDeLaSemana[now.dayOfTheWeek()][0]);
     lcd.print(" ");
     lcd.print((int)rtc.getTemperature());
+    //lcd.print((char)223);
     lcd.print("C ");
     if (reloj==2 || reloj==6){
       lcd.write(byte(0));
@@ -147,13 +160,13 @@ void loop()
     if(reloj==8){
       reloj=0;
     }
-    delay(250); //Para hacer que el reloj no sea el rayo mcqueen
-  //Menu de alarmas
-  if(digitalRead(BOTON_MENU)==LOW){
-    while(digitalRead(BOTON_MENU)==LOW);
-    mostrarAlarmas();
+  for(int i=0;i<25;i++){
+    if(digitalRead(BOTON_MENU)==LOW){
+      while(digitalRead(BOTON_MENU)==LOW);
+      mostrarAlarmas();//Menu de alarmas
+  } 
+  delay(10); //Para hacer que el reloj no sea el rayo mcqueen
   }
-
 }
     /*
     Restante: 
@@ -199,21 +212,27 @@ void mostrarAlarmas(void){
       lcd.setCursor(0, 0);
       lcd.print(j+1);
       lcd.setCursor(0, 1);
-        for (int i = 0; i < 4; i++){
-          if (i==3){
-            lcd.print(" ");
-            lcd.print(diasDeLaSemana[horarios[j][i]][0]); //dudoso, me fijo luego... horarios[j][4] tiene un numero del 0 al 6... si eso lo pongo en el dia e la semana...
-            continue;
-      }
-          if(horarios[j][i]<10){
-            lcd.print("0");
-            lcd.print(horarios[j][i]);
-      } else lcd.print(horarios[j][i]);    
-      if(i<2){
-        lcd.print(":");
-      }
-      
-  }
+      if(alarmas[j].hora<10){
+        lcd.print("0");
+        lcd.print(alarmas[j].hora);
+      } else lcd.print(alarmas[j].hora);
+      lcd.print(":");
+      if(alarmas[j].minuto<10){
+        lcd.print("0");
+        lcd.print(alarmas[j].minuto);
+      } else lcd.print(alarmas[j].minuto);
+      lcd.print(":");
+      if(alarmas[j].segundo<10){
+        lcd.print("0");
+        lcd.print(alarmas[j].segundo);
+      } else lcd.print(alarmas[j].segundo);
+      lcd.print(" ");
+      //Para mostrar los dias seleccionados en la alarma        
+        for(int i=0;i<7;i++){
+          if(alarmas[j].dias[i]==1){
+            lcd.print(diasDeLaSemana[i][0]);
+          }
+        }
       for(int i=0; i<100;i++){
         if(isButtonPressed()){
         while(isButtonPressed());
@@ -232,10 +251,26 @@ void clearEEPROM(void){
   delay(500);
   lcd.setCursor(0,0);
   lcd.print("Reseteando alarmas...");
-  for(int i=0;i<20;i++) EEPROM.write(i, 0); 
+  for(int i=0;i<100;i++) EEPROM.write(i, 0); 
   delay(2000);
   lcd.clear();
 }
+void overwriteEEPROM(void){
+  int cprom=0;
+  for(int i=0;i<max_alarmas;i++){
+  EEPROM.write(cprom, alarmas[i].hora);
+  cprom++;
+  EEPROM.write(cprom, alarmas[i].minuto);
+  cprom++;
+  EEPROM.write(cprom, alarmas[i].segundo);
+  cprom++;
+  for(int j=0;j<7;j++){
+    EEPROM.write(cprom, alarmas[i].dias[j]);
+    cprom++;
+  }
+}
+}
+
 // Una funcion que devuelve 1 si se presiona uno de los botones...
 int isButtonPressed(void){
   if(digitalRead(BOTON_MENU)==LOW) return 1;
@@ -284,7 +319,7 @@ void ingresarAlarmas(void){
       alarmaSeleccionada--;
     }
     //Si se sobrepasan los umbrales, se da la vuelta.
-    if(alarmaSeleccionada>=max_alarmas-1) alarmaSeleccionada=0;
+    if(alarmaSeleccionada>max_alarmas-1) alarmaSeleccionada=0;
     if(alarmaSeleccionada<0) alarmaSeleccionada=max_alarmas-1;
   switch(alarmaSeleccionada){
     case 0:
@@ -362,7 +397,174 @@ void ingresarAlarmas(void){
       lcd.write(byte(2));
       break;
   }
-  //Una vez se selecciono, se espera a que se ponga ENTER.
+  //Si apreta ENTER, selecciona la alarma, + y - no deberian de hacer nada.
+  if(digitalRead(BOTON_ENTER)==LOW){
+    //se selecciono la alarma
+    actualizarAlarma(alarmaSeleccionada);
+  }
+  if(digitalRead(BOTON_MENU)==LOW){
+    while(digitalRead(BOTON_MENU)==LOW);
+    return;
+  }
   }
   return;
 }
+void actualizarAlarma(int alarma){ 
+  //Para saber la posicion de la EEPROM en la cual arrancar... se sabe que son 10 espacios lo que ocupa cada espacio..se arranca en alarma*10.
+  int hora = alarmas[alarma].hora;
+  int minuto = alarmas[alarma].minuto;
+  int segundo = alarmas[alarma].segundo;
+  int* punteroHora= &hora, punteroMinuto=&minuto, punteroSegundo=&segundo;
+  char diasSeleccionados[7];
+  int parSeleccionado {};
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(alarma+1);
+  lcd.setCursor(0, 1);
+  if(hora<10){
+       lcd.print("0");
+       lcd.print(hora);
+      } else lcd.print(hora);
+  lcd.print(":");
+  if(minuto<10){
+       lcd.print("0");
+       lcd.print(minuto);
+      } else lcd.print(minuto);
+  lcd.print(":");
+   if(segundo<10){
+        lcd.print("0");
+        lcd.print(segundo);
+      } else lcd.print(segundo);
+    //Se imprimio la hora guardada, ahora tiene que titilar en el primer parametro para modificar (se modifican los valores copia, para evitar errores)...
+    while(1){
+      if(parSeleccionado==0){
+      titilar(parSeleccionado,punteroHora);
+      }
+      if(parSeleccionado==1){
+      titilar(parSeleccionado,punteroMinuto);
+      }
+      if(parSeleccionado==2){
+        titilar(parSeleccionado,punteroSegundo);
+      }
+      if(digitalRead(BOTON_ENTER)==LOW){
+        while(digitalRead(BOTON_ENTER)==LOW);
+        break;
+      }
+      if(digitalRead(BOTON_MENU)==LOW){
+        while(digitalRead(BOTON_MENU)==LOW);
+        return;
+      }
+      if(digitalRead(BOTON_LEFT)==LOW){
+        while(digitalRead(BOTON_LEFT)==LOW);
+        parSeleccionado--;
+      }
+      if(digitalRead(BOTON_RIGHT)==LOW){
+        while(digitalRead(BOTON_RIGHT)==LOW);
+        parSeleccionado++;
+      }
+    
+ if(parSeleccionado>2) parSeleccionado=0;
+ if(parSeleccionado<0) parSeleccionado=2;
+  
+} 
+//Ahora tiene que elejir los dias cuando se va a repetir la alarma.
+lcd.clear();
+delay(250);
+//Imprimo los dias con el cuadrado vacio abajo
+for (int i = 0; i < max_alarmas; i++)
+  {
+    lcd.setCursor(i,0);
+    lcd.print(diasDeLaSemana[i][0]);
+    lcd.setCursor(i,1);
+    lcd.write(byte(1));
+  }
+
+
+  
+  //Se actualiza el struct con los valores copia
+  alarmas[alarma].hora= hora;
+  alarmas[alarma].minuto= minuto;
+  alarmas[alarma].segundo= segundo;
+    //Por ultimo se tiene que actualizar la EEPROM.
+    overwriteEEPROM();
+return;
+}
+
+
+void titilar(int parametro, int* contenido){
+  //Bloque titilante de la hora
+  if(parametro==0){
+      lcd.setCursor(0,1);
+      lcd.write(byte(2));
+      lcd.setCursor(1,1);
+      lcd.write(byte(2));
+      for(int i=0;i<25;i++){
+        if(digitalRead(BOTON_UP)==LOW){
+        while(digitalRead(BOTON_UP)==LOW);
+        *contenido++;  
+      }
+      if(digitalRead(BOTON_DOWN)==LOW){
+        while(digitalRead(BOTON_DOWN)==LOW);
+        *contenido--;
+      }
+      if(*contenido<0) *contenido=23;
+      if(*contenido>23) *contenido=0;
+        delay(18);
+      }
+      lcd.setCursor(0,1);
+      if(*contenido<10){
+       lcd.print("0");
+       lcd.print(*contenido);
+      } else lcd.print(*contenido);
+  }
+  if(parametro==1){
+      lcd.setCursor(3,1);
+      lcd.write(byte(2));
+      lcd.setCursor(4,1);
+      lcd.write(byte(2));
+      for(int i=0;i<25;i++){
+        if(digitalRead(BOTON_UP)==LOW){
+        while(digitalRead(BOTON_UP)==LOW);
+        *contenido+=5;  
+      }
+      if(digitalRead(BOTON_DOWN)==LOW){
+        while(digitalRead(BOTON_DOWN)==LOW);
+        *contenido-=5;
+      }
+      if(*contenido<0) *contenido=55;
+      if(*contenido>55) *contenido=0;
+        delay(18);
+      }
+      lcd.setCursor(3,1);
+      if(*contenido<10){
+       lcd.print("0");
+       lcd.print(*contenido);
+      } else lcd.print(*contenido);
+  }
+  if(parametro==2){
+      lcd.setCursor(6,1);
+      lcd.write(byte(2));
+      lcd.setCursor(7,1);
+      lcd.write(byte(2));
+      for(int i=0;i<25;i++){
+        if(digitalRead(BOTON_UP)==LOW){
+        while(digitalRead(BOTON_UP)==LOW);
+        *contenido+=5;  
+      }
+      if(digitalRead(BOTON_DOWN)==LOW){
+        while(digitalRead(BOTON_DOWN)==LOW);
+        *contenido-=5;
+      }
+      if(*contenido<0) *contenido=55;
+      if(*contenido>55) *contenido=0;
+        delay(18);
+      }
+      lcd.setCursor(6,1);
+      if(*contenido<10){
+       lcd.print("0");
+       lcd.print(*contenido);
+      } else lcd.print(*contenido);
+  }
+  return; 
+  
+  }
