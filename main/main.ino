@@ -7,7 +7,7 @@
   -Ezequiel Santangelo
 
   Arduino NANO check
-  Botones N.A x8
+  Botones N.A x9
   tira de 15 pines x2
   cables hembra macho
   placa virgen 100x100
@@ -42,6 +42,7 @@ struct alarma {
   int segundo;
   //porque no bool? porque no se puede guardar un bool en EEPROM.
   char dias[7];  //manejo manual de los dias a repetir.
+  char activada;
 };
 struct alarma alarmas[max_alarmas + 1];
 
@@ -89,18 +90,20 @@ byte flechas_updown[8] = {
 //Funciones.
 void mostrarAlarmas(void);
 void ingresarAlarmas(void);
-void clearEEPROM(void);      //Adentro para hacer debugging
-void overwriteEEPROM(void);  //En caso de que se actualize el struct alarma alarmas.
+void clearEEPROM(void);           //Adentro para hacer debugging
+void overwriteEEPROM(void);       //En caso de que se actualize el struct alarma alarmas.
 bool isButtonPressed(void);
-void actualizarAlarma(int);  //Luego de seleccionar la alarma
+void activacion(void);            //Para activar cada una de las alarmas independientemente.
+void horaRTC(void);               //En caso de que se quiera cambiar la hora del RTC.
+void subeBaja(String, int, int, int*);
+void actualizarAlarma(int);       //Luego de seleccionar la alarma
 void borrarAlarma(void);
-void hora(struct alarma[], int);
-void minuto(struct alarma[], int);
-void segundo(struct alarma[], int);
-void titilarCuadrado(int, int);  //cuando cambio los dias
-void tocarTimbre(void);          //Cuando se cumple la funcion de abajo
-int checkHorario(DateTime);      //Revisa si el horario guardado es igual al del RTC.
-void bEmergencia(void);          //Hace un override de todo y toca el timbre hasta que suelta. (vuelve al menu principal).
+void titilarCuadrado(int, int);   //cuando cambio los dias
+void tocarTimbre(void);           //Cuando se cumple la funcion de abajo
+int checkHorario(DateTime);       //Revisa si el horario guardado es igual al del RTC.
+void bEmergencia(void);           //Hace un override de todo y toca el timbre hasta que suelta. (vuelve al menu principal).
+
+
 void setup() {
   Serial.begin(9600);
   if (!rtc.begin()) {
@@ -112,15 +115,6 @@ void setup() {
   //Los botones.
   pinMode(LED, OUTPUT);
   pinMode(ALARMA, OUTPUT);
-  pinMode(BOTON_MENU, INPUT);
-  pinMode(BOTON_ADD, INPUT);
-  pinMode(BOTON_REMOVE, INPUT);
-  pinMode(BOTON_UP, INPUT);
-  pinMode(BOTON_DOWN, INPUT);
-  pinMode(BOTON_RIGHT, INPUT);
-  pinMode(BOTON_LEFT, INPUT);
-  pinMode(BOTON_ENTER, INPUT);
-  pinMode(BOTON_EMERGENCIA, INPUT);
   pinMode(BOTON_MENU, INPUT_PULLUP);
   pinMode(BOTON_ADD, INPUT_PULLUP);
   pinMode(BOTON_REMOVE, INPUT_PULLUP);
@@ -139,7 +133,7 @@ void setup() {
   lcd.createChar(2, cuadrado_lleno);
   lcd.createChar(3, flechas_updown);
   //  clearEEPROM();
-  int cprom = 0;  //IMPORTANTE: Para llevar la cuenta de la memoria EEPROM
+  int cprom{};  //IMPORTANTE: Para llevar la cuenta de la memoria EEPROM
   //Lleno el array de structs
   for (int i = 0; i < max_alarmas; i++) {
     alarmas[i].hora = EEPROM.read(cprom);
@@ -152,6 +146,8 @@ void setup() {
       alarmas[i].dias[j] = EEPROM.read(cprom);
       cprom++;
     }
+    alarmas[i].activada = EEPROM.read(cprom);
+    cprom++;
   }
 }
 char diasDeLaSemana[7][2] = { "D", "L", "m", "M", "J", "V", "S" };
@@ -179,12 +175,11 @@ void loop() {
   if (now.second() < 10) {
     lcd.print("0");
     lcd.print(now.second());
-  } else
-    lcd.print(now.second());
+  } else lcd.print(now.second());
   lcd.print(" ");
   lcd.print(diasDeLaSemana[now.dayOfTheWeek()][0]);
   lcd.print(" ");
-  lcd.print((int)rtc.getTemperature());
+  lcd.print((int) rtc.getTemperature());
   //lcd.print((char)223);
   lcd.print("C ");
   if (reloj == 2 || reloj == 6) lcd.write(byte(0));
@@ -218,7 +213,7 @@ int checkHorario(DateTime now) {
   for (int i = 0; i < max_alarmas; i++) {
     if (now.hour() == alarmas[i].hora && now.minute() == alarmas[i].minuto && now.second() == alarmas[i].segundo) {
       for (int j = 0; j < 7; j++) {
-        if (now.dayOfTheWeek() == (alarmas[i].dias[j] + (j - 1))) return 1;
+        if (now.dayOfTheWeek() == (alarmas[i].dias[j] + (j - 1)) && alarmas[i].activada == 1) return 1;
       }
     }
   }
@@ -232,6 +227,87 @@ void tocarTimbre(void) {
   delay(TIEMPO_SONANDO_MS);
   digitalWrite(ALARMA, LOW);
   return;
+}
+void activacion(void){
+  int alarmaSeleccionada{};
+  lcd.clear();
+  lcd.setCursor(2,0);
+  lcd.print("Alarmas");
+  lcd.setCursor(1,1);
+  lcd.print("Activadas");
+  for(int i=0;i<100;i++){
+    if (digitalRead(BOTON_EMERGENCIA) == LOW) {
+      bEmergencia();
+      return;
+    }
+    if(digitalRead(BOTON_ADD)== LOW || digitalRead(BOTON_REMOVE)== LOW || digitalRead(BOTON_MENU)== LOW) return;
+    delay(10);
+  }
+
+  while(1){
+    if (digitalRead(BOTON_EMERGENCIA) == LOW) {
+      bEmergencia();
+      return;
+    }
+    //Imprimo todas las alarmas con un cuadrado vacio abajo.
+    for (int i = 0; i < max_alarmas; i++) {
+    lcd.setCursor(i, 0);
+    lcd.print(i + 1);
+    lcd.setCursor(i, 1);
+    lcd.write(byte(1));
+    }
+    //Imprimo los 8 cuadrados vacios arriba a la derecha.
+    for(int i=0;i<max_alarmas;i++){
+      lcd.setCursor(i+8,0);
+      if(alarmas[i].activada) lcd.write(byte(2));
+      else lcd.write(byte(1));
+    }
+    while (1) {
+    
+    if (digitalRead(BOTON_RIGHT) == LOW) {
+      while (digitalRead(BOTON_RIGHT) == LOW);
+      alarmaSeleccionada++;
+      break;
+    }
+    //idem a la izquierda.
+    if (digitalRead(BOTON_LEFT) == LOW) {
+      while (digitalRead(BOTON_LEFT) == LOW);
+      alarmaSeleccionada--;
+      break;
+    }
+    if (digitalRead(BOTON_EMERGENCIA) == LOW) {
+      bEmergencia();
+      return;
+    }
+    
+    //Si se sobrepasan los umbrales, se da la vuelta.
+    if (alarmaSeleccionada > max_alarmas - 1) alarmaSeleccionada = 0;
+    if (alarmaSeleccionada < 0) alarmaSeleccionada = max_alarmas - 1;
+    for (int i = 0; i < max_alarmas; i++) {
+      lcd.setCursor(i, 1);
+      if (i == alarmaSeleccionada) continue;
+      lcd.write(byte(1));
+    }
+    lcd.setCursor(alarmaSeleccionada, 1);
+    lcd.write(byte(2));
+    if (digitalRead(BOTON_ENTER) == LOW) {
+      //se selecciono la alarma a activar/desactivar.
+      while(digitalRead(BOTON_ENTER) == LOW);
+      alarmas[alarmaSeleccionada].activada = !alarmas[alarmaSeleccionada].activada;
+
+      for(int i=0;i<max_alarmas;i++){
+      lcd.setCursor(i+8,0);
+      if(alarmas[i].activada) lcd.write(byte(2));
+      else lcd.write(byte(1));
+      }
+    }
+
+    if (digitalRead(BOTON_MENU) == LOW) {
+      while (digitalRead(BOTON_MENU) == LOW);
+      return;
+    }
+  }
+  }
 }
 //Funcion que muestra las alarmas.
 void mostrarAlarmas(void) {
@@ -253,21 +329,29 @@ void mostrarAlarmas(void) {
     lcd.print("Alarmas");
     for (int i = 0; i < 100; i++) {
       if (isButtonPressed()) {
-        while (isButtonPressed());
         if (digitalRead(BOTON_EMERGENCIA) == LOW) {
           bEmergencia();
           return;
         }
+        while (isButtonPressed());
         return;
       }
       delay(10);
     }
     lcd.clear();
     for (int j = 0; j < max_alarmas; j++) {
-      if (isButtonPressed()) return;
+      if (digitalRead(BOTON_ADD) == LOW || digitalRead(BOTON_REMOVE) == LOW) return;
+      if (digitalRead(BOTON_MENU) == LOW){
+        activacion();
+        return;
+      }
       if (digitalRead(BOTON_EMERGENCIA) == LOW) {
         bEmergencia();
         return;
+      }
+      if(digitalRead(BOTON_ENTER)==LOW){
+        while(digitalRead(BOTON_ENTER)==LOW);
+        continue;
       }
       lcd.clear();
       //Mostrar alarma j.
@@ -301,10 +385,6 @@ void mostrarAlarmas(void) {
       for (int i = 0; i < 100; i++) {
         if (isButtonPressed()) {
           while (isButtonPressed());
-          if (digitalRead(BOTON_EMERGENCIA) == LOW) {
-            bEmergencia();
-            return;
-          }
           return;
         }
         delay(50);
@@ -312,15 +392,13 @@ void mostrarAlarmas(void) {
     }
   }
 }
-/* Para borrar la memoria EEPROM, veo si poner un boton...creo que generaria fallos...a no ser que genere una pantalla que dure x cant de segundos
-  y que diga memorias reseteadas
-*/
+
 void clearEEPROM(void) {
   lcd.clear();
   delay(500);
   lcd.setCursor(0, 0);
   lcd.print("Reseteando alarmas...");
-  for (int i = 0; i < 100; i++) EEPROM.write(i, 0);
+  for (int i = 0; i < 300; i++) EEPROM.write(i, 0);
   delay(2000);
   lcd.clear();
 }
@@ -337,9 +415,102 @@ void overwriteEEPROM(void) {
       EEPROM.write(cprom, alarmas[i].dias[j]);
       cprom++;
     }
+    EEPROM.write(cprom, alarmas[i].activada);
+    cprom++;
   }
+  return;
 }
+void subeBaja(String texto, int min, int max, int* modificable){
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(texto);
+  lcd.setCursor(0, 1);
+  lcd.write(byte(3));
+  while (1) {
+    lcd.setCursor(1, 1);
+    if (*modificable < 10) {
+      lcd.print("0");
+      lcd.print(*modificable);
+    } else lcd.print(*modificable);
+    if (digitalRead(BOTON_ENTER) == LOW){
+      while(digitalRead(BOTON_ENTER) == LOW);
+      break;
+    } 
+    
+    while (1) {
+      if (digitalRead(BOTON_ENTER) == LOW) break;
+      if (digitalRead(BOTON_MENU) == LOW || digitalRead(BOTON_EMERGENCIA) == LOW) return;
+      if (digitalRead(BOTON_UP) == LOW) {
+        *modificable += 1;
+        if (*modificable > max) *modificable = min;
+        while (digitalRead(BOTON_UP) == LOW);
+        break;
+      }
+      if (digitalRead(BOTON_DOWN) == LOW) {
+        *modificable -= 1;
+        if (*modificable < min) *modificable = max;
+        while (digitalRead(BOTON_DOWN) == LOW);
+        break;
+      }
+      if (digitalRead(BOTON_LEFT) == LOW) {
+        *modificable -= 5;
+        if (*modificable < min) *modificable += (max-min);
+        while (digitalRead(BOTON_LEFT) == LOW);
+        break;
+      }
+      if (digitalRead(BOTON_RIGHT) == LOW) {
+        *modificable += 5;
+        if (*modificable >max) *modificable -= (max-min);
+        while (digitalRead(BOTON_RIGHT) == LOW);
+        break;
+      }
+    }
+  }  
+    return;
+}
+//Para cambiar la hora del RTC mediante software.
+void horaRTC(void){
+  lcd.clear();
+  lcd.setCursor(1,0);
+  lcd.print("Cambiar Hora");
+  for(int i=0;i<100;i++){
+    if(isButtonPressed()) return;
+    delay(10);
+  }
+  DateTime now = rtc.now();
+  int hora = now.hour();
+  int *pHora = &hora;
+  subeBaja("Hora:", 0, 23, pHora);
+  if(isButtonPressed()) return;
+  //Se asigno la hora
+  int minuto = now.minute();
+  int *pMinuto = &minuto;
+  subeBaja("Minuto:",0,59,pMinuto);
+  //Se asignaron los minutos.
+  int segundo = now.second();
+  int *pSegundo = &segundo;
+  subeBaja("Segundo:", 0,59,pSegundo);
+  //Se asingaron los segundos
+  int ano = now.year();
+  int *pAno = &ano;
+  subeBaja("Año:",1971,2100,pAno);
+  //Se asigno el año.
+  if(isButtonPressed()) return;
+  //Se asignaron todos los valores
+  rtc.adjust(DateTime(now.year(),now.month(),now.day(),hora,minuto,segundo)); //Year, Month, y Day vendrian configurados de antes.
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Hora Ajustada");
+  for(int i=0;i<100;i++){
+    if(digitalRead(BOTON_EMERGENCIA) == LOW){
+      bEmergencia();
+      return;
+    }
+    delay(10);
+  }
 
+  return;
+}
 // Una funcion que devuelve 1 si se presiona uno de los botones significativos...
 bool isButtonPressed(void) {
   if (digitalRead(BOTON_MENU) == LOW) return 1;
@@ -348,11 +519,7 @@ bool isButtonPressed(void) {
   if (digitalRead(BOTON_EMERGENCIA) == LOW) return 1;
   return 0;
 }
-/*  Funcion para ingresar las alarmas, de manera que muestre todo 0, (y el dia 0, que es LUNES) si no hay nada escrito. Y
-    si hay, que muestre lo que hay.
-    ahora, para ingresar una nueva alarma, tiene que titilar el parametro a modificar, y con las flechas ARRIBA y ABAJO se cambia de a 5.
-    con las flechas DERECHA e IZQUIERDA se cambia el parametro a modificar.
-*/
+
 void borrarAlarmas(void) {
   int alarmaSeleccionada{};
   lcd.clear();
@@ -503,9 +670,12 @@ void ingresarAlarmas(void) {
 }
 void actualizarAlarma(int alarma) {
   int parSeleccionado{ 0 };
-  hora(alarmas, alarma);
-  minuto(alarmas, alarma);
-  segundo(alarmas, alarma);
+  int *pHora =  &alarmas[alarma].hora;
+  int *pMinuto = &alarmas[alarma].minuto;
+  int *pSegundo = &alarmas[alarma].segundo;
+  subeBaja("Hora:", 0,23, pHora);
+  subeBaja("Minuto:", 0,59, pMinuto);
+  subeBaja("Segundo:",0,59, pSegundo);
   if (digitalRead(BOTON_MENU) == LOW) {
     while (digitalRead(BOTON_MENU) == LOW);
     return;
@@ -569,10 +739,10 @@ void actualizarAlarma(int alarma) {
     }
   }
   //Por ultimo se tiene que actualizar la EEPROM.
+  alarmas[alarma].activada = 1; //Se activa la alarma recien añadida/modificada.
   overwriteEEPROM();
   return;
 }
-
 void titilarCuadrado(int parametro, int alarma) {
   while (1) {
 
@@ -620,126 +790,6 @@ void titilarCuadrado(int parametro, int alarma) {
       }
       if (isButtonPressed()) return;
       delay(10);
-    }
-  }
-  return;
-}
-
-void hora(struct alarma alarmas[], int alarma) {
-  while (digitalRead(BOTON_ENTER) == LOW);                                          //para evitar errores.
-  if (digitalRead(BOTON_MENU) == LOW) return;  //Esta estructura se repite en las otras 2 funciones.
-  if (digitalRead(BOTON_EMERGENCIA) == LOW) return;
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Hora:");
-  lcd.setCursor(0, 1);
-  lcd.write(byte(3));
-  while (1) {
-    lcd.setCursor(1, 1);
-    if (alarmas[alarma].hora < 10) {
-      lcd.print("0");
-      lcd.print(alarmas[alarma].hora);
-    } else
-      lcd.print(alarmas[alarma].hora);
-
-    while (1) {
-      if (digitalRead(BOTON_ENTER) == LOW) {
-        while (digitalRead(BOTON_ENTER) == LOW);  //cuando lo suelte va a volver, asi no lo detecta afuera.
-        return;
-      }
-      if (digitalRead(BOTON_MENU) == LOW) return;
-      if (digitalRead(BOTON_EMERGENCIA) == LOW) return;
-
-      if (digitalRead(BOTON_UP) == LOW) {
-        alarmas[alarma].hora += 1;
-        if (alarmas[alarma].hora > 23) alarmas[alarma].hora = 0;
-        while (digitalRead(BOTON_UP) == LOW);
-        break;
-      }
-      if (digitalRead(BOTON_DOWN) == LOW) {
-        alarmas[alarma].hora -= 1;
-        if (alarmas[alarma].hora < 0) alarmas[alarma].hora = 23;
-        while (digitalRead(BOTON_DOWN) == LOW);
-        break;
-      }
-    }
-  }
-  return;
-}
-void minuto(struct alarma alarmas[], int alarma) {
-  if (digitalRead(BOTON_MENU) == LOW) return;
-  if (digitalRead(BOTON_EMERGENCIA) == LOW) return;
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Minuto:");
-  lcd.setCursor(0, 1);
-  lcd.write(byte(3));
-  while (1) {
-    lcd.setCursor(1, 1);
-    if (alarmas[alarma].minuto < 10) {
-      lcd.print("0");
-      lcd.print(alarmas[alarma].minuto);
-    } else
-      lcd.print(alarmas[alarma].minuto);
-    while (1) {
-      if (digitalRead(BOTON_ENTER) == LOW) {
-        while (digitalRead(BOTON_ENTER) == LOW);
-        return;
-      }
-      if (digitalRead(BOTON_MENU) == LOW) return;
-      if (digitalRead(BOTON_EMERGENCIA) == LOW) return;
-
-      if (digitalRead(BOTON_UP) == LOW) {
-        alarmas[alarma].minuto += 1;
-        if (alarmas[alarma].minuto > 59) alarmas[alarma].minuto = 0;
-        while (digitalRead(BOTON_UP) == LOW);
-        break;
-      }
-      if (digitalRead(BOTON_DOWN) == LOW) {
-        alarmas[alarma].minuto -= 1;
-        if (alarmas[alarma].minuto < 0) alarmas[alarma].minuto = 59;
-        while (digitalRead(BOTON_DOWN) == LOW);
-        break;
-      }
-    }
-  }
-  return;
-}
-void segundo(struct alarma alarmas[], int alarma) {
-  if (digitalRead(BOTON_MENU) == LOW) return;
-  if (digitalRead(BOTON_EMERGENCIA) == LOW) return;
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Segundo:");
-  lcd.setCursor(0, 1);
-  lcd.write(byte(3));
-  while (1) {
-    lcd.setCursor(1, 1);
-    if (alarmas[alarma].segundo < 10) {
-      lcd.print("0");
-      lcd.print(alarmas[alarma].segundo);
-    } else
-      lcd.print(alarmas[alarma].segundo);
-    while (1) {
-      if (digitalRead(BOTON_ENTER) == LOW) {
-        while (digitalRead(BOTON_ENTER) == LOW);
-        return;
-      }
-      if (digitalRead(BOTON_MENU) == LOW) return;
-      if (digitalRead(BOTON_EMERGENCIA) == LOW) return;
-
-      if (digitalRead(BOTON_UP) == LOW) {
-        alarmas[alarma].segundo += 5;
-        if (alarmas[alarma].segundo > 55) alarmas[alarma].segundo = 0;
-        while (digitalRead(BOTON_UP) == LOW);
-        break;
-      }
-      if (digitalRead(BOTON_DOWN) == LOW) {
-        alarmas[alarma].segundo -= 5;
-        if (alarmas[alarma].segundo < 0) alarmas[alarma].segundo = 55;
-        while (digitalRead(BOTON_DOWN) == LOW);
-        break;
-      }
     }
   }
   return;
